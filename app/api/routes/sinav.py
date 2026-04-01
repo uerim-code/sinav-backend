@@ -1408,6 +1408,152 @@ def kazanim_analizi(sinav_id: UUID, db: Session = Depends(get_db), _=Depends(get
     }
 
 
+@router.get("/analiz/{sinav_id}/kitapcik-karsilastirma")
+def kitapcik_karsilastirma(sinav_id: UUID, db: Session = Depends(get_db), _=Depends(get_user)):
+    """20. Kitapcik denkleme — A/B/C/D gruplari arasi t-test karsilastirmasi."""
+    import math
+    sonuclar = db.query(Sonuc).filter_by(sinav_id=str(sinav_id)).all()
+    if not sonuclar:
+        raise HTTPException(404, "Henuz sonuc yok")
+
+    # Kitapcik bazli gruplama
+    gruplar = {}
+    for s in sonuclar:
+        k = s.kitapcik or "A"
+        if k not in gruplar:
+            gruplar[k] = []
+        gruplar[k].append(s.ham_puan)
+
+    if len(gruplar) < 2:
+        return {"gruplar": [], "karsilastirmalar": [], "yorum": "Tek kitapcik kullanilmis, karsilastirma yapilamaz."}
+
+    # Her grup icin istatistikler
+    grup_istat = []
+    for kit, puanlar in sorted(gruplar.items()):
+        n = len(puanlar)
+        ort = sum(puanlar) / n
+        var = sum((p - ort) ** 2 for p in puanlar) / (n - 1) if n > 1 else 0
+        std = math.sqrt(var)
+        grup_istat.append({
+            "kitapcik": kit, "n": n, "ortalama": round(ort, 2),
+            "std_sapma": round(std, 2), "min": round(min(puanlar), 2), "max": round(max(puanlar), 2),
+        })
+
+    # Ikili t-test karsilastirmalari
+    karsilastirmalar = []
+    kitapciklar = sorted(gruplar.keys())
+    for i in range(len(kitapciklar)):
+        for j in range(i + 1, len(kitapciklar)):
+            k1, k2 = kitapciklar[i], kitapciklar[j]
+            p1, p2 = gruplar[k1], gruplar[k2]
+            n1, n2 = len(p1), len(p2)
+            ort1, ort2 = sum(p1) / n1, sum(p2) / n2
+            var1 = sum((p - ort1) ** 2 for p in p1) / (n1 - 1) if n1 > 1 else 0
+            var2 = sum((p - ort2) ** 2 for p in p2) / (n2 - 1) if n2 > 1 else 0
+
+            # Welch t-test
+            se = math.sqrt(var1 / n1 + var2 / n2) if (var1 / n1 + var2 / n2) > 0 else 1
+            t_val = (ort1 - ort2) / se
+            # Yaklasik p-degeri (normal dagilim yaklasimi)
+            try:
+                from scipy import stats
+                df = ((var1 / n1 + var2 / n2) ** 2) / ((var1 / n1) ** 2 / (n1 - 1) + (var2 / n2) ** 2 / (n2 - 1)) if n1 > 1 and n2 > 1 else n1 + n2 - 2
+                p_val = 2 * (1 - stats.t.cdf(abs(t_val), df))
+            except Exception:
+                p_val = None
+
+            anlamli = p_val is not None and p_val < 0.05
+            yorum = f"{k1} vs {k2}: " + (
+                f"Anlamli fark var (p={round(p_val, 4)}). Kitapciklar denk degil." if anlamli else
+                f"Anlamli fark yok (p={round(p_val, 4) if p_val else '?'}). Kitapciklar denk." if p_val else
+                "Hesaplanamadi."
+            )
+
+            karsilastirmalar.append({
+                "grup1": k1, "grup2": k2,
+                "ort1": round(ort1, 2), "ort2": round(ort2, 2),
+                "fark": round(ort1 - ort2, 2),
+                "t_degeri": round(t_val, 3),
+                "p_degeri": round(p_val, 4) if p_val else None,
+                "anlamli": anlamli,
+                "yorum": yorum,
+            })
+
+    genel_yorum = "Tum kitapciklar denk." if all(not k["anlamli"] for k in karsilastirmalar) else "Bazi kitapciklar arasinda anlamli fark var — denkleme gerekli."
+
+    return {"gruplar": grup_istat, "karsilastirmalar": karsilastirmalar, "yorum": genel_yorum}
+
+
+@router.get("/analiz/ders/{ders_id}/donem-karsilastirma")
+def donem_karsilastirma(ders_id: UUID, db: Session = Depends(get_db), _=Depends(get_user)):
+    """21. Ayni dersin farkli sinavlarinin karsilastirmasi."""
+    import math
+    sinavlar = db.query(Sinav).filter_by(ders_id=str(ders_id)).order_by(Sinav.baslangic).all()
+    if len(sinavlar) < 1:
+        return {"sinavlar": [], "yorum": "Bu derse ait sinav yok."}
+
+    sinav_istatler = []
+    for sinav in sinavlar:
+        sonuclar = db.query(Sonuc).filter_by(sinav_id=str(sinav.id)).all()
+        if not sonuclar:
+            continue
+        puanlar = [s.ham_puan for s in sonuclar]
+        n = len(puanlar)
+        ort = sum(puanlar) / n
+        var = sum((p - ort) ** 2 for p in puanlar) / n if n > 0 else 0
+        std = math.sqrt(var)
+        sinav_istatler.append({
+            "sinav_id": str(sinav.id), "ad": sinav.ad, "sinav_turu": sinav.sinav_turu,
+            "tarih": sinav.baslangic.strftime('%d.%m.%Y') if sinav.baslangic else None,
+            "n": n, "ortalama": round(ort, 2), "std_sapma": round(std, 2),
+            "min": round(min(puanlar), 2), "max": round(max(puanlar), 2),
+            "basari_orani": round(sum(1 for p in puanlar if p >= sinav.tam_puan * 0.5) / n * 100, 1),
+        })
+
+    if len(sinav_istatler) < 2:
+        yorum = "Karsilastirma icin en az 2 sinav gerekli."
+    else:
+        ortalar = [s["ortalama"] for s in sinav_istatler]
+        trend = "yukseliyor" if ortalar[-1] > ortalar[0] else "dusuyor" if ortalar[-1] < ortalar[0] else "sabit"
+        yorum = f"Sinav ortalamasi {trend}. Ilk sinav: {ortalar[0]}, son sinav: {ortalar[-1]}."
+
+    return {"sinavlar": sinav_istatler, "yorum": yorum}
+
+
+@router.get("/analiz/ders-haritasi")
+def ders_basari_haritasi(db: Session = Depends(get_db), _=Depends(get_user)):
+    """22. Tum derslerin genel basari ozeti."""
+    import math
+    dersler = db.query(Ders).filter_by(aktif=True).all()
+    harita = []
+    for ders in dersler:
+        sinavlar = db.query(Sinav).filter_by(ders_id=str(ders.id)).all()
+        if not sinavlar:
+            continue
+        tum_puanlar = []
+        sinav_sayisi = 0
+        for sinav in sinavlar:
+            sonuclar = db.query(Sonuc).filter_by(sinav_id=str(sinav.id)).all()
+            if sonuclar:
+                sinav_sayisi += 1
+                tum_puanlar.extend([s.ham_puan for s in sonuclar])
+
+        if not tum_puanlar:
+            continue
+
+        n = len(tum_puanlar)
+        ort = sum(tum_puanlar) / n
+        harita.append({
+            "ders_id": str(ders.id), "ders_ad": ders.ad,
+            "sinav_sayisi": sinav_sayisi, "ogrenci_sayisi": n,
+            "ortalama": round(ort, 2),
+            "basari_orani": round(sum(1 for p in tum_puanlar if p >= 50) / n * 100, 1),
+        })
+
+    harita.sort(key=lambda x: x["basari_orani"], reverse=True)
+    return {"dersler": harita}
+
+
 # ══════════════════════════════════════════════════════════════════
 #  SORU SABLON + TOPLU YUKLEME
 # ══════════════════════════════════════════════════════════════════
