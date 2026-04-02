@@ -2363,24 +2363,24 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
         alignment=TA_CENTER, spaceAfter=3*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SinavAltBaslik', fontSize=9, fontName=fn,
+        name='SinavAltBaslik', fontSize=10, fontName=fn,
         alignment=TA_CENTER, spaceAfter=4*mm, textColor=colors.HexColor('#555555'),
     ))
     styles.add(ParagraphStyle(
-        name='SoruMetni', fontSize=8, fontName=fn,
-        leading=10, spaceAfter=1*mm, leftIndent=4*mm,
+        name='SoruMetni', fontSize=10, fontName=fn,
+        leading=12, spaceAfter=1*mm, leftIndent=4*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SoruNo', fontSize=8, fontName=fn_bold,
+        name='SoruNo', fontSize=10, fontName=fn_bold,
         spaceAfter=0.5*mm,
     ))
     styles.add(ParagraphStyle(
-        name='Secenek', fontSize=7.5, fontName=fn,
-        leading=9, leftIndent=8*mm,
+        name='Secenek', fontSize=10, fontName=fn,
+        leading=12, leftIndent=8*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SecenekDogru', fontSize=7.5, fontName=fn_bold,
-        leading=9, leftIndent=8*mm, textColor=colors.HexColor('#10b981'),
+        name='SecenekDogru', fontSize=10, fontName=fn_bold,
+        leading=12, leftIndent=8*mm, textColor=colors.HexColor('#10b981'),
     ))
 
     elements = []
@@ -2426,7 +2426,7 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
         metin = re_mod.sub(r'<[^>]+>', '', s["soru_metni"])
         kazanim_str = ""
         if s.get("kazanim_kodlari"):
-            kazanim_str = f"  <font color='#6b7280' size='6'>(Ö.K. {', '.join(s['kazanim_kodlari'])})</font>"
+            kazanim_str = f"  <font color='#6b7280' size='8'>(Ö.K. {', '.join(s['kazanim_kodlari'])})</font>"
         blok = [
             Paragraph(f"<b>{s['sira']}.</b>{kazanim_str} {metin}", styles['SoruMetni']),
         ]
@@ -2659,35 +2659,48 @@ def sinav_docx(sinav_id: UUID, kitapcik: str = "A", db: Session = Depends(get_db
     # Sorulari ekle (body'nin sonuna, sectPr'den once)
     sect_pr = body.find('w:sectPr', ns)
 
+    # Cift sutun ayarla (section properties)
+    from lxml import etree as _etree
+    if sect_pr is not None:
+        cols_elem = sect_pr.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cols')
+        if cols_elem is None:
+            cols_elem = _etree.SubElement(sect_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cols')
+        cols_elem.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}num', '2')
+        cols_elem.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}space', '284')  # ~0.5cm
+
     for s in sorular:
         metin = re_mod.sub(r'<[^>]+>', '', s["soru_metni"])
         kazanim_str = f"  (Ö.K. {', '.join(s['kazanim_kodlari'])})" if s.get("kazanim_kodlari") else ""
 
         # Soru numarasi + metin
         soru_p = doc.add_paragraph()
-        soru_p.paragraph_format.space_before = Pt(8)
-        soru_p.paragraph_format.space_after = Pt(4)
+        soru_p.paragraph_format.space_before = Pt(4)
+        soru_p.paragraph_format.space_after = Pt(2)
         run_no = soru_p.add_run(f"{s['sira']}. ")
         run_no.bold = True
-        run_no.font.size = Pt(11)
+        run_no.font.size = Pt(10)
+        run_no.font.name = 'Arial'
         run_metin = soru_p.add_run(metin)
-        run_metin.font.size = Pt(11)
+        run_metin.font.size = Pt(10)
+        run_metin.font.name = 'Arial'
         if kazanim_str:
             run_kaz = soru_p.add_run(kazanim_str)
-            run_kaz.font.size = Pt(8)
-            run_kaz.font.color.rgb = None  # gri
+            run_kaz.font.size = Pt(10)
+            run_kaz.font.name = 'Arial'
 
         # Secenekler
         for sec in s["secenekler"]:
             sec_p = doc.add_paragraph()
-            sec_p.paragraph_format.space_before = Pt(1)
-            sec_p.paragraph_format.space_after = Pt(1)
-            sec_p.paragraph_format.left_indent = Cm(1)
+            sec_p.paragraph_format.space_before = Pt(0)
+            sec_p.paragraph_format.space_after = Pt(0)
+            sec_p.paragraph_format.left_indent = Cm(0.5)
             run_harf = sec_p.add_run(f"{sec['harf']}) ")
             run_harf.bold = True
             run_harf.font.size = Pt(10)
+            run_harf.font.name = 'Arial'
             run_sec = sec_p.add_run(sec["metin"])
             run_sec.font.size = Pt(10)
+            run_sec.font.name = 'Arial'
 
     # sectPr'yi sona tasi
     if sect_pr is not None:
