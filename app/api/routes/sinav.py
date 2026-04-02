@@ -461,6 +461,8 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
     sinav_sorulari = db.query(SinavSorusu).filter_by(sinav_id=str(sinav_id)).order_by(SinavSorusu.sira).all()
     soru_map = {s.sira: str(s.soru_id) for s in sinav_sorulari}
 
+    # Not: Yanlis cevap cezasi uygulanmiyor (net = dogru sayisi)
+
     # Onceki sonuclari temizle
     eski_sonuclar = db.query(Sonuc).filter_by(sinav_id=str(sinav_id)).all()
     for es in eski_sonuclar:
@@ -534,7 +536,7 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
                 ))
 
             toplam = dogru_sayisi + yanlis_sayisi + bos_sayisi
-            net = dogru_sayisi - (yanlis_sayisi / 4) if toplam > 0 else 0
+            net = dogru_sayisi if toplam > 0 else 0
             ham_puan = (net / toplam * sinav.tam_puan) if toplam > 0 else 0
 
             sonuc = Sonuc(
@@ -600,7 +602,7 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
                 ))
 
         toplam = dogru_sayisi + yanlis_sayisi + bos_sayisi
-        net = dogru_sayisi - (yanlis_sayisi / 4) if toplam > 0 else 0
+        net = dogru_sayisi if toplam > 0 else 0
         ham_puan = (net / toplam * sinav.tam_puan) if toplam > 0 else 0
 
         sonuc = Sonuc(
@@ -2357,28 +2359,28 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
 
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
-        name='SinavBaslik', fontSize=16, fontName=fn_bold,
-        alignment=TA_CENTER, spaceAfter=4*mm,
+        name='SinavBaslik', fontSize=14, fontName=fn_bold,
+        alignment=TA_CENTER, spaceAfter=3*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SinavAltBaslik', fontSize=11, fontName=fn,
-        alignment=TA_CENTER, spaceAfter=6*mm, textColor=colors.HexColor('#555555'),
+        name='SinavAltBaslik', fontSize=9, fontName=fn,
+        alignment=TA_CENTER, spaceAfter=4*mm, textColor=colors.HexColor('#555555'),
     ))
     styles.add(ParagraphStyle(
-        name='SoruMetni', fontSize=11, fontName=fn,
-        leading=15, spaceAfter=2*mm, leftIndent=6*mm,
+        name='SoruMetni', fontSize=8, fontName=fn,
+        leading=10, spaceAfter=1*mm, leftIndent=4*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SoruNo', fontSize=11, fontName=fn_bold,
-        spaceAfter=1*mm,
+        name='SoruNo', fontSize=8, fontName=fn_bold,
+        spaceAfter=0.5*mm,
     ))
     styles.add(ParagraphStyle(
-        name='Secenek', fontSize=10, fontName=fn,
-        leading=14, leftIndent=12*mm,
+        name='Secenek', fontSize=7.5, fontName=fn,
+        leading=9, leftIndent=8*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SecenekDogru', fontSize=10, fontName=fn_bold,
-        leading=14, leftIndent=12*mm, textColor=colors.HexColor('#10b981'),
+        name='SecenekDogru', fontSize=7.5, fontName=fn_bold,
+        leading=9, leftIndent=8*mm, textColor=colors.HexColor('#10b981'),
     ))
 
     elements = []
@@ -2418,30 +2420,41 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
     ]))
     elements.append(line_table)
 
-    # Sorular
-    for s in sorular:
+    # Sorular — cift sutun layout
+    def soru_blogu(s):
+        """Tek soru icin paragraf listesi olustur."""
         metin = re_mod.sub(r'<[^>]+>', '', s["soru_metni"])
-
-        # Kazanim kodu varsa soru numarasinin yanina ekle
         kazanim_str = ""
         if s.get("kazanim_kodlari"):
-            kazanim_str = f"  <font color='#6b7280' size='9'>(O.K. {', '.join(s['kazanim_kodlari'])})</font>"
-        elements.append(Paragraph(f"Soru {s['sira']}.{kazanim_str}", styles['SoruNo']))
-        elements.append(Paragraph(metin, styles['SoruMetni']))
-
+            kazanim_str = f"  <font color='#6b7280' size='6'>(Ö.K. {', '.join(s['kazanim_kodlari'])})</font>"
+        blok = [
+            Paragraph(f"<b>{s['sira']}.</b>{kazanim_str} {metin}", styles['SoruMetni']),
+        ]
         for sec in s["secenekler"]:
-            if cevap_anahtari and sec["dogru"]:
-                elements.append(Paragraph(
-                    f"<b>{sec['harf']})</b> {sec['metin']}",
-                    styles['SecenekDogru']
-                ))
-            else:
-                elements.append(Paragraph(
-                    f"<b>{sec['harf']})</b> {sec['metin']}",
-                    styles['Secenek']
-                ))
+            stil = styles['SecenekDogru'] if (cevap_anahtari and sec["dogru"]) else styles['Secenek']
+            blok.append(Paragraph(f"<b>{sec['harf']})</b> {sec['metin']}", stil))
+        blok.append(Spacer(1, 2*mm))
+        return blok
 
-        elements.append(Spacer(1, 4*mm))
+    # Sorulari ikiser ikiser cift sutuna yerlestir
+    sayfa_genisligi = 174 * mm  # A4 - margins
+    sutun_genisligi = sayfa_genisligi / 2 - 2*mm
+
+    for i in range(0, len(sorular), 2):
+        sol_bloklar = soru_blogu(sorular[i])
+        sag_bloklar = soru_blogu(sorular[i + 1]) if i + 1 < len(sorular) else [Spacer(1, 1)]
+
+        row_data = [[sol_bloklar, sag_bloklar]]
+        t = Table(row_data, colWidths=[sutun_genisligi, sutun_genisligi])
+        t.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('LINEAFTER', (0, 0), (0, -1), 0.5, colors.HexColor('#e5e7eb')),
+        ]))
+        elements.append(t)
 
     # Cevap anahtarı sayfası
     if cevap_anahtari:
