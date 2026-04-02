@@ -169,6 +169,7 @@ class Sinav(Base):
     soru_secim_sekli = Column(String(30), nullable=True)
     olusturan_id     = Column(UUID(as_uuid=True), ForeignKey("kullanicilar.id"), nullable=True)
     durum            = Column(String(20), default="taslak")
+    kilitli          = Column(Boolean, default=False)  # Sonuc yuklendikten sonra kilitlenir
 
     ders           = relationship("Ders", back_populates="sinavlar")
     planlar        = relationship("SinavPlani", back_populates="sinav", cascade="all, delete-orphan")
@@ -198,6 +199,11 @@ class SinavSorusu(Base):
     soru_id  = Column(UUID(as_uuid=True), ForeignKey("so_sorular.id", ondelete="CASCADE"), nullable=False)
     sira     = Column(Integer, nullable=True)
     kitapcik = Column(String(1), nullable=True)
+    # Soru snapshot — sinav uygulandiktan sonra kaydedilir
+    soru_metni_snapshot   = Column(Text, nullable=True)
+    secenekler_snapshot   = Column(JSON, nullable=True)  # [{"harf":"A","metin":"...","dogru":true}, ...]
+    zorluk_snapshot       = Column(String(20), nullable=True)
+    bilgisel_duzey_snapshot = Column(String(30), nullable=True)
 
     sinav = relationship("Sinav", back_populates="sinav_sorulari")
     soru  = relationship("Soru", back_populates="sinav_sorulari")

@@ -375,6 +375,7 @@ def sinav_detay(sinav_id: UUID, db: Session = Depends(get_db), _=Depends(get_use
         "ders_id": str(s.ders_id) if s.ders_id else None,
         "ders_ad": ders.ad if ders else None,
         "soru_sayisi_atanmis": soru_sayisi_atanmis,
+        "kilitli": s.kilitli or False,
     }
 
 
@@ -394,6 +395,18 @@ def sinav_guncelle(sinav_id: UUID, veri: dict, db: Session = Depends(get_db), _=
     if "durum" in veri: s.durum = veri["durum"]
     db.commit()
     return {"ok": True}
+
+
+@router.delete("/sinavlar/{sinav_id}")
+def sinav_sil(sinav_id: UUID, db: Session = Depends(get_db), _=Depends(get_admin_user)):
+    """Sinavi sil — sadece yonetici."""
+    sinav = db.query(Sinav).filter_by(id=str(sinav_id)).first()
+    if not sinav:
+        raise HTTPException(404, "Sınav bulunamadı")
+    # Cascade ile tum iliskili veriler silinir (sorular, sonuclar, plan, ogrenciler)
+    db.delete(sinav)
+    db.commit()
+    return {"ok": True, "mesaj": f"'{sinav.ad}' sınavı silindi"}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -612,6 +625,24 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
 
     # Otomatik zorluk guncelleme (madde analizi bazli)
     _zorluk_guncelle_from_analiz(db, str(sinav_id))
+
+    # Sinavi kilitle ve soru snapshot'larini kaydet
+    sinav.kilitli = True
+    sinav.durum = "tamamlandi"
+    sinav_sorulari_all = db.query(SinavSorusu).filter_by(sinav_id=str(sinav_id)).all()
+    for ss in sinav_sorulari_all:
+        if not ss.soru_metni_snapshot:  # Sadece ilk kez kaydet
+            soru = db.query(Soru).filter_by(id=str(ss.soru_id)).first()
+            if soru:
+                ss.soru_metni_snapshot = soru.soru_metni
+                ss.zorluk_snapshot = soru.zorluk
+                ss.bilgisel_duzey_snapshot = soru.bilgisel_duzey
+                secenekler = db.query(SoruSecenegi).filter_by(soru_id=str(soru.id)).order_by(SoruSecenegi.sira).all()
+                ss.secenekler_snapshot = [
+                    {"harf": "ABCDE"[i], "metin": sc.secenek_metni, "dogru": sc.dogru}
+                    for i, sc in enumerate(secenekler) if i < 5
+                ]
+    db.commit()
 
     return {"kaydedilen": kaydedilen, "toplam_satir": len(rows) - 1}
 
@@ -2108,19 +2139,32 @@ def sinav_kagidi(sinav_id: UUID, kitapcik: str = "A", db: Session = Depends(get_
 
     sorular = []
     for ss in sinav_sorulari:
-        soru = db.query(Soru).filter_by(id=str(ss.soru_id)).first()
-        if not soru:
-            continue
-        secenekler = db.query(SoruSecenegi).filter_by(soru_id=str(soru.id)).order_by(SoruSecenegi.sira).all()
-        konu = db.query(Konu).filter_by(id=str(soru.konu_id)).first()
-        sorular.append({
-            "sira": ss.sira,
-            "soru_metni": soru.soru_metni,
-            "soru_tipi": soru.soru_tipi,
-            "zorluk": soru.zorluk,
-            "konu": konu.ad if konu else None,
-            "secenekler": [{"harf": "ABCDE"[i], "metin": sc.secenek_metni, "dogru": sc.dogru} for i, sc in enumerate(secenekler)],
-        })
+        # Snapshot varsa (sinav uygulanmis) snapshot'tan oku, yoksa guncel sorudan
+        if ss.soru_metni_snapshot:
+            sorular.append({
+                "sira": ss.sira,
+                "soru_metni": ss.soru_metni_snapshot,
+                "soru_tipi": None,
+                "zorluk": ss.zorluk_snapshot,
+                "konu": None,
+                "secenekler": ss.secenekler_snapshot or [],
+                "snapshot": True,
+            })
+        else:
+            soru = db.query(Soru).filter_by(id=str(ss.soru_id)).first()
+            if not soru:
+                continue
+            secenekler = db.query(SoruSecenegi).filter_by(soru_id=str(soru.id)).order_by(SoruSecenegi.sira).all()
+            konu = db.query(Konu).filter_by(id=str(soru.konu_id)).first()
+            sorular.append({
+                "sira": ss.sira,
+                "soru_metni": soru.soru_metni,
+                "soru_tipi": soru.soru_tipi,
+                "zorluk": soru.zorluk,
+                "konu": konu.ad if konu else None,
+                "secenekler": [{"harf": "ABCDE"[i], "metin": sc.secenek_metni, "dogru": sc.dogru} for i, sc in enumerate(secenekler)],
+                "snapshot": False,
+            })
 
     # Kitapciklari listele
     kitapciklar = list(set(ss.kitapcik for ss in db.query(SinavSorusu).filter_by(sinav_id=str(sinav_id)).all() if ss.kitapcik))
