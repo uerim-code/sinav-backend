@@ -2576,9 +2576,16 @@ def sinav_docx(sinav_id: UUID, kitapcik: str = "A", db: Session = Depends(get_db
     ders_ad = ders.ad if ders else ""
 
     # Sablonu yukle
-    sablon_yolu = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "sinav_sablonu.docx")
-    if not os.path.exists(sablon_yolu):
-        raise HTTPException(500, "Sinav sablonu bulunamadi")
+    # Sablon yolunu bul — birden fazla konum dene
+    import pathlib
+    _base = pathlib.Path(__file__).resolve().parent.parent.parent
+    sablon_yolu = None
+    for yol in [_base / "sinav_sablonu.docx", _base.parent / "sinav_sablonu.docx", pathlib.Path("/app/sinav_sablonu.docx")]:
+        if yol.exists():
+            sablon_yolu = str(yol)
+            break
+    if not sablon_yolu:
+        raise HTTPException(500, f"Sinav sablonu bulunamadi. Aranan: {_base}/sinav_sablonu.docx")
 
     doc = DocxDocument(sablon_yolu)
 
