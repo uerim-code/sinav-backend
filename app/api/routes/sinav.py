@@ -398,15 +398,19 @@ def sinav_guncelle(sinav_id: UUID, veri: dict, db: Session = Depends(get_db), _=
 
 
 @router.delete("/sinavlar/{sinav_id}")
-def sinav_sil(sinav_id: UUID, db: Session = Depends(get_db), _=Depends(get_admin_user)):
-    """Sinavi sil — sadece yonetici."""
+def sinav_sil(sinav_id: UUID, onay: bool = False, db: Session = Depends(get_db), _=Depends(get_admin_user)):
+    """Sinavi sil — sadece yonetici. Kilitli sinav icin onay=true gerekli."""
     sinav = db.query(Sinav).filter_by(id=str(sinav_id)).first()
     if not sinav:
         raise HTTPException(404, "Sınav bulunamadı")
-    # Cascade ile tum iliskili veriler silinir (sorular, sonuclar, plan, ogrenciler)
+    # Kilitli sinav korumasi
+    sonuc_sayisi = db.query(Sonuc).filter_by(sinav_id=str(sinav_id)).count()
+    if sinav.kilitli and not onay:
+        raise HTTPException(400, f"Bu sinav kilitli ve {sonuc_sayisi} ogrenci sonucu var. Silmek icin onay=true gonderin.")
+    # Cascade ile tum iliskili veriler silinir
     db.delete(sinav)
     db.commit()
-    return {"ok": True, "mesaj": f"'{sinav.ad}' sınavı silindi"}
+    return {"ok": True, "mesaj": f"'{sinav.ad}' sinavi silindi ({sonuc_sayisi} sonuc dahil)"}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -430,10 +434,13 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
     rows = []
     if dosya_adi.endswith('.xlsx') or dosya_adi.endswith('.xls'):
         import openpyxl
-        wb = openpyxl.load_workbook(io.BytesIO(icerik), read_only=True, data_only=True)
-        ws = wb.active
-        for row in ws.iter_rows(values_only=True):
-            rows.append([str(c or '').strip() for c in row])
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(icerik), read_only=True, data_only=True)
+            ws = wb.active
+            for row in ws.iter_rows(values_only=True):
+                rows.append([str(c or '').strip() for c in row])
+        except Exception as e:
+            raise HTTPException(400, f"Excel dosyasi okunamadi: {str(e)}")
     else:
         try:
             text = icerik.decode('utf-8')
