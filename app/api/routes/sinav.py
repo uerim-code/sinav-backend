@@ -632,10 +632,11 @@ def sonuc_sablon_indir(sinav_id: UUID, db: Session = Depends(get_db), _=Depends(
     wb.save(buffer)
     buffer.seek(0)
 
+    from urllib.parse import quote
     filename = f"Sonuc_Sablonu_{sinav.ad.replace(' ', '_')}.xlsx"
     return StreamingResponse(
         buffer, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
     )
 
 
@@ -2132,10 +2133,11 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
     doc.build(elements)
     buffer.seek(0)
 
+    from urllib.parse import quote
     filename = f"{sinav.ad.replace(' ', '_')}_Kitapcik_{kitapcik}.pdf"
     return StreamingResponse(
         buffer, media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
     )
 
 
@@ -2339,8 +2341,9 @@ def sinav_docx(sinav_id: UUID, kitapcik: str = "A", db: Session = Depends(get_db
     doc.save(buffer)
     buffer.seek(0)
 
+    from urllib.parse import quote
     filename = f"{sinav.ad.replace(' ', '_')}_Kitapcik_{kitapcik}.docx"
     return StreamingResponse(
         buffer, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
     )
