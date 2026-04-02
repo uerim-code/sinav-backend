@@ -29,8 +29,17 @@ def _migrate():
                 conn.rollback()
 try:
     _migrate()
+    print("Migration basarili")
 except Exception as e:
     print(f"Migration uyarisi: {e}")
+
+# Mevcut fontlari listele (debug)
+import glob
+fonts = glob.glob('/usr/share/fonts/**/*.ttf', recursive=True)
+if fonts:
+    print(f"Mevcut fontlar ({len(fonts)}): {[f.split('/')[-1] for f in fonts[:10]]}")
+else:
+    print("UYARI: Sistemde TTF font bulunamadi!")
 
 app = FastAPI(
     title="Sinav Otomasyon API",
