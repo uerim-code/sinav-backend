@@ -1561,18 +1561,71 @@ def ders_basari_haritasi(db: Session = Depends(get_db), _=Depends(get_user)):
 
 @router.get("/soru-sablon")
 def soru_sablon_indir(_=Depends(get_user)):
-    """Soru yukleme Excel sablonu."""
+    """Soru yukleme Excel sablonu — hafta bilgisi ile tum konulara tek seferde yukleme."""
     import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from urllib.parse import quote
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sorular"
-    basliklar = ["Soru Metni", "A", "B", "C", "D", "E", "Dogru Cevap", "Soru Tipi", "Bilgisel Duzey", "Zorluk", "Cevaplama Suresi", "Anahtar Kelimeler"]
+
+    baslik_font = Font(bold=True, color="FFFFFF", size=11)
+    baslik_fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+    basliklar = ["Hafta", "Soru Metni", "A", "B", "C", "D", "E", "Dogru Cevap", "Soru Tipi", "Bilgisel Duzey", "Zorluk", "Cevaplama Suresi", "Anahtar Kelimeler"]
     for i, h in enumerate(basliklar, 1):
-        ws.cell(row=1, column=i, value=h).font = openpyxl.styles.Font(bold=True)
-    ws.append(["Hucre bolunmesinde hangi organel gorev alir?", "Mitokondri", "Ribozom", "Sentrozom", "Golgi", "Lizozom", "C", "tek_dogru", "Bilgi", "orta", 60, "hucre,bolunme"])
-    for col in ws.columns:
-        ws.column_dimensions[col[0].column_letter].width = 18
+        cell = ws.cell(row=1, column=i, value=h)
+        cell.font = baslik_font
+        cell.fill = baslik_fill
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = thin_border
+
+    # Ornek satirlar
+    ornekler = [
+        [1, "Hucre bolunmesinde hangi organel gorev alir?", "Mitokondri", "Ribozom", "Sentrozom", "Golgi", "Lizozom", "C", "coktan_secmeli", "Bilgi", "orta", 60, "hucre,bolunme"],
+        [1, "DNA replikasyonunda hangi enzim gorev yapar?", "Lipaz", "Amilaz", "DNA polimeraz", "Proteaz", "", "C", "coktan_secmeli", "Kavrama", "zor", 90, "DNA,replikasyon"],
+        [2, "Atom numarasi neyi ifade eder?", "Noetron sayisi", "Proton sayisi", "Elektron sayisi", "Kutle", "", "B", "coktan_secmeli", "Bilgi", "kolay", 45, "atom,proton"],
+    ]
+    for ornek in ornekler:
+        ws.append(ornek)
+
+    # Sutun genislikleri
+    genislikler = [8, 45, 18, 18, 18, 18, 18, 12, 15, 15, 10, 14, 20]
+    for i, g in enumerate(genislikler):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = g
+
+    # Aciklama sayfasi
+    ws2 = wb.create_sheet("Aciklama")
+    aciklamalar = [
+        ["SORU YUKLEME SABLONU"],
+        [""],
+        ["SUTUN ACIKLAMALARI:"],
+        ["Hafta", "Sorunun ait oldugu hafta numarasi (1, 2, 3...). Dersin konulariyla otomatik eslestirilir."],
+        ["Soru Metni", "Sorunun tam metni (zorunlu)"],
+        ["A, B, C, D, E", "Secenekler. En az 2 secenek gerekli. Bos birakilabilir."],
+        ["Dogru Cevap", "Dogru secenek harfi: A, B, C, D veya E"],
+        ["Soru Tipi", "coktan_secmeli, dogru_yanlis, bosluk_doldurma, acik_uclu"],
+        ["Bilgisel Duzey", "Bilgi, Kavrama, Uygulama, Analiz, Sentez, Degerlendirme"],
+        ["Zorluk", "cok_kolay, kolay, orta, zor, cok_zor"],
+        ["Cevaplama Suresi", "Saniye cinsinden (varsayilan: 60)"],
+        ["Anahtar Kelimeler", "Virgülle ayrilmis kelimeler"],
+        [""],
+        ["ONEMLI NOTLAR:"],
+        ["- Hafta numarasi dersin konu haftasiyla eslesir (H1, H2, H3...)"],
+        ["- Farkli haftalara ait sorular ayni dosyada olabilir"],
+        ["- Tum sorular tek seferde ilgili konulara otomatik dagitilir"],
+        ["- Soru Tipi ve Bilgisel Duzey bos birakilirsa varsayilan degerler kullanilir"],
+        ["- Ornek satirlari silip kendi verilerinizi girin"],
+    ]
+    for r, row in enumerate(aciklamalar, 1):
+        for c, val in enumerate(row, 1):
+            cell = ws2.cell(row=r, column=c, value=val)
+            if r == 1: cell.font = Font(bold=True, size=14)
+            elif r == 3 or r == 14: cell.font = Font(bold=True, size=12)
+    ws2.column_dimensions['A'].width = 20
+    ws2.column_dimensions['B'].width = 70
 
     buf = io.BytesIO(); wb.save(buf); buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1581,7 +1634,7 @@ def soru_sablon_indir(_=Depends(get_user)):
 
 @router.post("/sorular/toplu-yukle/{konu_id}")
 async def sorular_toplu_yukle(konu_id: UUID, dosya: UploadFile = File(...), db: Session = Depends(get_db), me=Depends(get_yetkili_user)):
-    """Excel'den toplu soru yukle."""
+    """Excel'den tek konuya toplu soru yukle."""
     import openpyxl
     icerik = await dosya.read()
     wb = openpyxl.load_workbook(io.BytesIO(icerik), read_only=True, data_only=True)
@@ -1593,26 +1646,34 @@ async def sorular_toplu_yukle(konu_id: UUID, dosya: UploadFile = File(...), db: 
     harfler = "ABCDE"
     eklenen = 0
     for row in rows[1:]:
-        if not row or not row[0]: continue
-        soru_metni = str(row[0]).strip()
+        if not row: continue
+        # Hafta sutunu varsa atla (ilk sutun sayi ise), yoksa eski format
+        offset = 0
+        first_val = str(row[0] or "").strip()
+        if first_val.isdigit() and len(row) > 7:
+            offset = 1  # Hafta sutunu var, atla (tek konu yuklemede hafta anlamsiz)
+
+        soru_metni = str(row[offset] or "").strip()
+        if not soru_metni: continue
+
         secenekler = []
-        dogru_cevap = str(row[6] or "A").strip().upper() if len(row) > 6 else "A"
+        dogru_cevap = str(row[offset + 6] or "A").strip().upper() if len(row) > offset + 6 else "A"
 
         for i in range(5):
-            if len(row) > i + 1 and row[i + 1]:
+            if len(row) > offset + i + 1 and row[offset + i + 1]:
                 secenekler.append({
-                    "metin": str(row[i + 1]).strip(),
+                    "metin": str(row[offset + i + 1]).strip(),
                     "dogru": harfler[i] == dogru_cevap,
                     "sira": i,
                 })
 
         s = Soru(
             konu_id=str(konu_id), soru_metni=soru_metni,
-            soru_tipi=str(row[7] or "tek_dogru").strip() if len(row) > 7 else "tek_dogru",
-            bilgisel_duzey=str(row[8] or "Bilgi").strip() if len(row) > 8 else "Bilgi",
-            zorluk=str(row[9] or "orta").strip() if len(row) > 9 else "orta",
-            cevaplama_suresi=int(float(str(row[10] or 60))) if len(row) > 10 else 60,
-            anahtar_kelimeler=str(row[11] or "").split(",") if len(row) > 11 and row[11] else [],
+            soru_tipi=str(row[offset + 7] or "coktan_secmeli").strip() if len(row) > offset + 7 else "coktan_secmeli",
+            bilgisel_duzey=str(row[offset + 8] or "Bilgi").strip() if len(row) > offset + 8 else "Bilgi",
+            zorluk=str(row[offset + 9] or "orta").strip() if len(row) > offset + 9 else "orta",
+            cevaplama_suresi=int(float(str(row[offset + 10] or 60))) if len(row) > offset + 10 else 60,
+            anahtar_kelimeler=str(row[offset + 11] or "").split(",") if len(row) > offset + 11 and row[offset + 11] else [],
             olusturan_id=str(me.id),
         )
         db.add(s); db.flush()
@@ -1622,6 +1683,89 @@ async def sorular_toplu_yukle(konu_id: UUID, dosya: UploadFile = File(...), db: 
 
     db.commit()
     return {"eklenen": eklenen}
+
+
+@router.post("/sorular/toplu-yukle-ders/{ders_id}")
+async def sorular_toplu_yukle_ders(ders_id: UUID, dosya: UploadFile = File(...), db: Session = Depends(get_db), me=Depends(get_yetkili_user)):
+    """Excel'den ders bazli toplu soru yukle — hafta numarasina gore konulara otomatik dagit."""
+    import openpyxl
+    icerik = await dosya.read()
+    wb = openpyxl.load_workbook(io.BytesIO(icerik), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 2:
+        raise HTTPException(400, "Excel'de veri yok")
+
+    # Dersin konularini hafta bazli haritala
+    konular = db.query(Konu).filter_by(ders_id=str(ders_id)).order_by(Konu.sira).all()
+    if not konular:
+        raise HTTPException(400, "Bu dersin konusu yok. Once konu ekleyin.")
+
+    # Hafta -> konu_id eslestirmesi
+    hafta_konu = {}
+    for i, k in enumerate(konular):
+        hafta = k.hafta or (i + 1)
+        hafta_konu[hafta] = str(k.id)
+        hafta_konu[str(hafta)] = str(k.id)
+    # Konu adi ile de eslestir
+    for k in konular:
+        hafta_konu[k.ad.lower().strip()] = str(k.id)
+
+    harfler = "ABCDE"
+    eklenen = 0
+    atlanamayan = []
+
+    for row_idx, row in enumerate(rows[1:], 2):
+        if not row or not row[0]: continue
+
+        hafta_val = str(row[0]).strip()
+        soru_metni = str(row[1] or "").strip() if len(row) > 1 else ""
+        if not soru_metni: continue
+
+        # Hafta -> konu eslestir
+        konu_id = None
+        # Sayi olarak dene
+        try:
+            konu_id = hafta_konu.get(int(float(hafta_val)))
+        except (ValueError, TypeError):
+            pass
+        # String olarak dene
+        if not konu_id:
+            konu_id = hafta_konu.get(hafta_val)
+        # Konu adi olarak dene
+        if not konu_id:
+            konu_id = hafta_konu.get(hafta_val.lower().strip())
+
+        if not konu_id:
+            atlanamayan.append(f"Satir {row_idx}: Hafta '{hafta_val}' ile eslesen konu bulunamadi")
+            continue
+
+        secenekler = []
+        dogru_cevap = str(row[7] or "A").strip().upper() if len(row) > 7 else "A"
+        for i in range(5):
+            if len(row) > i + 2 and row[i + 2]:
+                secenekler.append({
+                    "metin": str(row[i + 2]).strip(),
+                    "dogru": harfler[i] == dogru_cevap,
+                    "sira": i,
+                })
+
+        s = Soru(
+            konu_id=konu_id, soru_metni=soru_metni,
+            soru_tipi=str(row[8] or "coktan_secmeli").strip() if len(row) > 8 else "coktan_secmeli",
+            bilgisel_duzey=str(row[9] or "Bilgi").strip() if len(row) > 9 else "Bilgi",
+            zorluk=str(row[10] or "orta").strip() if len(row) > 10 else "orta",
+            cevaplama_suresi=int(float(str(row[11] or 60))) if len(row) > 11 else 60,
+            anahtar_kelimeler=str(row[12] or "").split(",") if len(row) > 12 and row[12] else [],
+            olusturan_id=str(me.id),
+        )
+        db.add(s); db.flush()
+        for sc in secenekler:
+            db.add(SoruSecenegi(soru_id=str(s.id), secenek_metni=sc["metin"], dogru=sc["dogru"], sira=sc["sira"]))
+        eklenen += 1
+
+    db.commit()
+    return {"eklenen": eklenen, "atlanan": atlanamayan, "toplam_konu": len(konular)}
 
 
 # ══════════════════════════════════════════════════════════════════
