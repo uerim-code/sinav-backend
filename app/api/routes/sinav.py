@@ -2029,12 +2029,25 @@ def otomatik_sinav_olustur(sinav_id: UUID, veri: dict, db: Session = Depends(get
     if not konular:
         raise HTTPException(400, "Dersin konusu yok, once konu ekleyin")
 
-    # Tum sorulari topla
+    # Daha once bu derste kullanilmis sorulari bul
+    onceki_sinavlar = db.query(Sinav).filter(
+        Sinav.ders_id == str(ders.id), Sinav.id != str(sinav_id)
+    ).all()
+    kullanilmis_soru_ids = set()
+    for os in onceki_sinavlar:
+        for ss in db.query(SinavSorusu).filter_by(sinav_id=str(os.id)).all():
+            kullanilmis_soru_ids.add(str(ss.soru_id))
+
+    # Tum sorulari topla ve oncelik belirle
     tum_sorular = []
     for konu in konular:
         sorular = db.query(Soru).filter_by(konu_id=str(konu.id)).all()
         for s in sorular:
-            tum_sorular.append({"id": str(s.id), "konu_id": str(konu.id), "zorluk": s.zorluk or "orta", "konu_ad": konu.ad})
+            tum_sorular.append({
+                "id": str(s.id), "konu_id": str(konu.id),
+                "zorluk": s.zorluk or "orta", "konu_ad": konu.ad,
+                "onceki_kullanilmis": str(s.id) in kullanilmis_soru_ids,
+            })
 
     if len(tum_sorular) < soru_sayisi:
         raise HTTPException(400, f"Yeterli soru yok: {len(tum_sorular)} mevcut, {soru_sayisi} gerekli")
@@ -2049,13 +2062,24 @@ def otomatik_sinav_olustur(sinav_id: UUID, veri: dict, db: Session = Depends(get
     for g in range(grup_sayisi):
         kitapcik = kitapcik_harfler[g] if g < len(kitapcik_harfler) else str(g + 1)
 
+        def oncelikli_sec(havuz, adet):
+            """Daha once sorulmamis sorulara oncelik vererek sec."""
+            yeni = [s for s in havuz if not s["onceki_kullanilmis"]]
+            eski = [s for s in havuz if s["onceki_kullanilmis"]]
+            random.shuffle(yeni)
+            random.shuffle(eski)
+            # Oncelik: yeni sorular, yetersizse eskilerden tamamla
+            secim = yeni[:adet]
+            if len(secim) < adet:
+                secim.extend(eski[:adet - len(secim)])
+            return secim
+
         if dagilim == "manuel" and veri.get("konu_agirliklari"):
             # Manuel: konu bazli soru sayilari belirli
             secilen = []
             for konu_id, adet in veri["konu_agirliklari"].items():
                 konu_sorulari = [s for s in tum_sorular if s["konu_id"] == konu_id]
-                random.shuffle(konu_sorulari)
-                secilen.extend(konu_sorulari[:adet])
+                secilen.extend(oncelikli_sec(konu_sorulari, adet))
         else:
             # Zorluk dagilimina gore sec
             kolay_n = int(soru_sayisi * zorluk_dag.get("kolay", 25) / 100)
@@ -2066,17 +2090,13 @@ def otomatik_sinav_olustur(sinav_id: UUID, veri: dict, db: Session = Depends(get
             orta_havuz = [s for s in tum_sorular if s["zorluk"] == "orta"]
             zor_havuz = [s for s in tum_sorular if s["zorluk"] in ("zor", "cok_zor")]
 
-            random.shuffle(kolay_havuz)
-            random.shuffle(orta_havuz)
-            random.shuffle(zor_havuz)
+            secilen = oncelikli_sec(kolay_havuz, kolay_n) + oncelikli_sec(orta_havuz, orta_n) + oncelikli_sec(zor_havuz, zor_n)
 
-            secilen = kolay_havuz[:kolay_n] + orta_havuz[:orta_n] + zor_havuz[:zor_n]
-
-            # Eksik kalirsa rastgele tamamla
+            # Eksik kalirsa rastgele tamamla (yeni oncelikli)
             if len(secilen) < soru_sayisi:
-                kalanlar = [s for s in tum_sorular if s not in secilen]
-                random.shuffle(kalanlar)
-                secilen.extend(kalanlar[:soru_sayisi - len(secilen)])
+                secilen_ids = {s["id"] for s in secilen}
+                kalanlar = [s for s in tum_sorular if s["id"] not in secilen_ids]
+                secilen.extend(oncelikli_sec(kalanlar, soru_sayisi - len(secilen)))
 
         # Grup icinde siralama karistir
         random.shuffle(secilen)
