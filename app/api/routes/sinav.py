@@ -1962,7 +1962,32 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
     import re as re_mod
+
+    # Türkçe karakter destekli font kaydet
+    import subprocess, glob
+    font_kayitli = False
+    for font_path in ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                      '/usr/share/fonts/TTF/DejaVuSans.ttf',
+                      '/usr/share/fonts/dejavu/DejaVuSans.ttf']:
+        if os.path.exists(font_path):
+            pdfmetrics.registerFont(TTFont('DejaVu', font_path))
+            pdfmetrics.registerFont(TTFont('DejaVu-Bold', font_path.replace('Sans.ttf', 'Sans-Bold.ttf')))
+            font_kayitli = True
+            break
+    if not font_kayitli:
+        # Fallback: mevcut fontlari ara
+        for p in glob.glob('/usr/share/fonts/**/*.ttf', recursive=True):
+            if 'DejaVu' in p and 'Sans.ttf' in p:
+                pdfmetrics.registerFont(TTFont('DejaVu', p))
+                pdfmetrics.registerFont(TTFont('DejaVu-Bold', p.replace('Sans.ttf', 'Sans-Bold.ttf')))
+                font_kayitli = True
+                break
+
+    fn = 'DejaVu' if font_kayitli else 'Helvetica'
+    fn_bold = 'DejaVu-Bold' if font_kayitli else 'Helvetica-Bold'
 
     sinav = db.query(Sinav).filter_by(id=str(sinav_id)).first()
     if not sinav:
@@ -2019,27 +2044,27 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
 
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
-        name='SinavBaslik', fontSize=16, fontName='Helvetica-Bold',
+        name='SinavBaslik', fontSize=16, fontName=fn_bold,
         alignment=TA_CENTER, spaceAfter=4*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SinavAltBaslik', fontSize=11, fontName='Helvetica',
+        name='SinavAltBaslik', fontSize=11, fontName=fn,
         alignment=TA_CENTER, spaceAfter=6*mm, textColor=colors.HexColor('#555555'),
     ))
     styles.add(ParagraphStyle(
-        name='SoruMetni', fontSize=11, fontName='Helvetica',
+        name='SoruMetni', fontSize=11, fontName=fn,
         leading=15, spaceAfter=2*mm, leftIndent=6*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SoruNo', fontSize=11, fontName='Helvetica-Bold',
+        name='SoruNo', fontSize=11, fontName=fn_bold,
         spaceAfter=1*mm,
     ))
     styles.add(ParagraphStyle(
-        name='Secenek', fontSize=10, fontName='Helvetica',
+        name='Secenek', fontSize=10, fontName=fn,
         leading=14, leftIndent=12*mm,
     ))
     styles.add(ParagraphStyle(
-        name='SecenekDogru', fontSize=10, fontName='Helvetica-Bold',
+        name='SecenekDogru', fontSize=10, fontName=fn_bold,
         leading=14, leftIndent=12*mm, textColor=colors.HexColor('#10b981'),
     ))
 
@@ -2055,15 +2080,15 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
 
     # Öğrenci bilgi alanı
     bilgi_data = [
-        ['Ad Soyad:', '____________________________', 'Ogrenci No:', '________________'],
-        ['Tarih:', sinav.baslangic.strftime('%d.%m.%Y') if sinav.baslangic else '___/___/______', 'Imza:', '________________'],
+        ['Ad Soyad:', '____________________________', 'Öğrenci No:', '________________'],
+        ['Tarih:', sinav.baslangic.strftime('%d.%m.%Y') if sinav.baslangic else '___/___/______', 'İmza:', '________________'],
     ]
     bilgi_tablo = Table(bilgi_data, colWidths=[22*mm, 60*mm, 22*mm, 50*mm])
     bilgi_tablo.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTNAME', (0, 0), (-1, -1), fn),
         ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (0, -1), fn_bold),
+        ('FONTNAME', (2, 0), (2, -1), fn_bold),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4*mm),
         ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
     ]))
@@ -2118,7 +2143,7 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
 
         ct = Table(cevap_data, colWidths=[30*mm, 40*mm])
         ct.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), fn_bold),
             ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6366f1')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
