@@ -2255,20 +2255,18 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
     import re as re_mod
 
     # Türkçe karakter destekli font kaydet
-    # Sıra: Arial > Liberation Sans > DejaVu Sans > Helvetica (fallback)
     import glob
     font_kayitli = False
+
+    # Oncelik: repo icindeki fontlar (her ortamda calisir)
+    repo_font_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "fonts")
     font_aramalari = [
-        # Arial
-        ('/usr/share/fonts/truetype/msttcorefonts/Arial.ttf', '/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf'),
-        ('/usr/share/fonts/truetype/arial.ttf', '/usr/share/fonts/truetype/arialbd.ttf'),
-        # Liberation Sans (Arial uyumlu)
-        ('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf'),
-        ('/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf', '/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf'),
-        # DejaVu Sans
+        # Repo icindeki DejaVu Sans
+        (os.path.join(repo_font_dir, 'DejaVuSans.ttf'), os.path.join(repo_font_dir, 'DejaVuSans-Bold.ttf')),
+        # Sistem fontlari
         ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'),
         ('/usr/share/fonts/TTF/DejaVuSans.ttf', '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'),
-        ('/usr/share/fonts/dejavu/DejaVuSans.ttf', '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf'),
+        ('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf'),
     ]
     for regular, bold in font_aramalari:
         if os.path.exists(regular):
