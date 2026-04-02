@@ -169,7 +169,7 @@ class Sinav(Base):
     soru_secim_sekli = Column(String(30), nullable=True)
     olusturan_id     = Column(UUID(as_uuid=True), ForeignKey("kullanicilar.id"), nullable=True)
     durum            = Column(String(20), default="taslak")
-    kilitli          = Column(Boolean, default=False)  # Sonuc yuklendikten sonra kilitlenir
+    kilitli          = Column(Boolean, default=False, nullable=True)  # Sonuc yuklendikten sonra kilitlenir
 
     ders           = relationship("Ders", back_populates="sinavlar")
     planlar        = relationship("SinavPlani", back_populates="sinav", cascade="all, delete-orphan")

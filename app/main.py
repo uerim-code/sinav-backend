@@ -10,6 +10,28 @@ from app.db.session import engine, Base
 from app.models import kullanici, sinav  # noqa: F401
 Base.metadata.create_all(bind=engine)
 
+# Eksik sutunlari ekle (migration)
+def _migrate():
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        migrations = [
+            ("so_sinavlar", "kilitli", "ALTER TABLE so_sinavlar ADD COLUMN IF NOT EXISTS kilitli BOOLEAN DEFAULT FALSE"),
+            ("so_sinav_sorulari", "soru_metni_snapshot", "ALTER TABLE so_sinav_sorulari ADD COLUMN IF NOT EXISTS soru_metni_snapshot TEXT"),
+            ("so_sinav_sorulari", "secenekler_snapshot", "ALTER TABLE so_sinav_sorulari ADD COLUMN IF NOT EXISTS secenekler_snapshot JSON"),
+            ("so_sinav_sorulari", "zorluk_snapshot", "ALTER TABLE so_sinav_sorulari ADD COLUMN IF NOT EXISTS zorluk_snapshot VARCHAR(20)"),
+            ("so_sinav_sorulari", "bilgisel_duzey_snapshot", "ALTER TABLE so_sinav_sorulari ADD COLUMN IF NOT EXISTS bilgisel_duzey_snapshot VARCHAR(30)"),
+        ]
+        for tablo, sutun, sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+try:
+    _migrate()
+except Exception as e:
+    print(f"Migration uyarisi: {e}")
+
 app = FastAPI(
     title="Sinav Otomasyon API",
     version="1.0.0",
