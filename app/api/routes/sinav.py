@@ -1967,27 +1967,47 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
     import re as re_mod
 
     # Türkçe karakter destekli font kaydet
-    import subprocess, glob
+    # Sıra: Arial > Liberation Sans > DejaVu Sans > Helvetica (fallback)
+    import glob
     font_kayitli = False
-    for font_path in ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                      '/usr/share/fonts/TTF/DejaVuSans.ttf',
-                      '/usr/share/fonts/dejavu/DejaVuSans.ttf']:
-        if os.path.exists(font_path):
-            pdfmetrics.registerFont(TTFont('DejaVu', font_path))
-            pdfmetrics.registerFont(TTFont('DejaVu-Bold', font_path.replace('Sans.ttf', 'Sans-Bold.ttf')))
+    font_aramalari = [
+        # Arial
+        ('/usr/share/fonts/truetype/msttcorefonts/Arial.ttf', '/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf'),
+        ('/usr/share/fonts/truetype/arial.ttf', '/usr/share/fonts/truetype/arialbd.ttf'),
+        # Liberation Sans (Arial uyumlu)
+        ('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf', '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf'),
+        ('/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf', '/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf'),
+        # DejaVu Sans
+        ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'),
+        ('/usr/share/fonts/TTF/DejaVuSans.ttf', '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'),
+        ('/usr/share/fonts/dejavu/DejaVuSans.ttf', '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf'),
+    ]
+    for regular, bold in font_aramalari:
+        if os.path.exists(regular):
+            pdfmetrics.registerFont(TTFont('TrFont', regular))
+            if os.path.exists(bold):
+                pdfmetrics.registerFont(TTFont('TrFont-Bold', bold))
+            else:
+                pdfmetrics.registerFont(TTFont('TrFont-Bold', regular))
             font_kayitli = True
             break
     if not font_kayitli:
-        # Fallback: mevcut fontlari ara
         for p in glob.glob('/usr/share/fonts/**/*.ttf', recursive=True):
-            if 'DejaVu' in p and 'Sans.ttf' in p:
-                pdfmetrics.registerFont(TTFont('DejaVu', p))
-                pdfmetrics.registerFont(TTFont('DejaVu-Bold', p.replace('Sans.ttf', 'Sans-Bold.ttf')))
+            if 'Liberation' in p and 'Regular' in p:
+                pdfmetrics.registerFont(TTFont('TrFont', p))
+                pdfmetrics.registerFont(TTFont('TrFont-Bold', p.replace('Regular', 'Bold')))
                 font_kayitli = True
                 break
+        if not font_kayitli:
+            for p in glob.glob('/usr/share/fonts/**/*.ttf', recursive=True):
+                if 'DejaVu' in p and 'Sans.ttf' in p:
+                    pdfmetrics.registerFont(TTFont('TrFont', p))
+                    pdfmetrics.registerFont(TTFont('TrFont-Bold', p.replace('Sans.ttf', 'Sans-Bold.ttf')))
+                    font_kayitli = True
+                    break
 
-    fn = 'DejaVu' if font_kayitli else 'Helvetica'
-    fn_bold = 'DejaVu-Bold' if font_kayitli else 'Helvetica-Bold'
+    fn = 'TrFont' if font_kayitli else 'Helvetica'
+    fn_bold = 'TrFont-Bold' if font_kayitli else 'Helvetica-Bold'
 
     sinav = db.query(Sinav).filter_by(id=str(sinav_id)).first()
     if not sinav:
