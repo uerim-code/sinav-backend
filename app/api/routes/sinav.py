@@ -402,9 +402,9 @@ def sinav_guncelle(sinav_id: UUID, veri: dict, db: Session = Depends(get_db), _=
 
 @router.post("/optik-yukle/{sinav_id}")
 async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session = Depends(get_db), _=Depends(get_yetkili_user)):
-    """Optik okuyucu CSV/Excel yukle -> ogrenci cevaplari parse et -> kaydet.
-    Format: ogrenci_no, ad_soyad, kitapcik, cevap1, cevap2, ...
-    veya:   ogrenci_no, kitapcik, cevap1, cevap2, ...
+    """Optik okuyucu sonuc yukle. Iki format desteklenir:
+    1) Optik okuyucu formati: Sinav No | Cevap Anahtari | Numarasi | Adi Soyadi | Kitapcik Kodu | Sayfa No | Girmedi | 1 | 2 | ...
+    2) Basit format: Ogrenci No | Ad Soyad | Kitapcik | S1 | S2 | ...
     """
     import csv
     sinav = db.query(Sinav).filter_by(id=str(sinav_id)).first()
@@ -417,7 +417,7 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
     rows = []
     if dosya_adi.endswith('.xlsx') or dosya_adi.endswith('.xls'):
         import openpyxl
-        wb = openpyxl.load_workbook(io.BytesIO(icerik), read_only=True)
+        wb = openpyxl.load_workbook(io.BytesIO(icerik), read_only=True, data_only=True)
         ws = wb.active
         for row in ws.iter_rows(values_only=True):
             rows.append([str(c or '').strip() for c in row])
@@ -432,17 +432,16 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
     if len(rows) < 2:
         raise HTTPException(400, "Dosyada veri bulunamadi")
 
-    # Baslik satirindan format algilama
     basliklar = [h.strip().lower() for h in rows[0]]
-    has_ad = any('ad' in h or 'name' in h or 'soyad' in h for h in basliklar)
-    # ad_soyad sutunu varsa: no, ad, kitapcik, cevaplar
-    # yoksa: no, kitapcik, cevaplar
-    cevap_baslangic = 3 if has_ad else 2
+
+    # ── Format algilama ──
+    # Optik okuyucu formati: basliklarinda "cevap anahtarı" veya "sınav no" veya "girmedi" var
+    is_optik = any(k in ' '.join(basliklar) for k in ['cevap anah', 'sınav no', 'sinav no', 'girmedi', 'kitapcık kodu', 'kitapcik kodu'])
 
     sinav_sorulari = db.query(SinavSorusu).filter_by(sinav_id=str(sinav_id)).order_by(SinavSorusu.sira).all()
     soru_map = {s.sira: str(s.soru_id) for s in sinav_sorulari}
 
-    # Onceki sonuclari temizle (yeniden yukleme)
+    # Onceki sonuclari temizle
     eski_sonuclar = db.query(Sonuc).filter_by(sinav_id=str(sinav_id)).all()
     for es in eski_sonuclar:
         db.query(OgrenciCevap).filter_by(sinav_sonucu_id=str(es.id)).delete()
@@ -450,54 +449,135 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
     db.query(Ogrenci).filter_by(sinav_id=str(sinav_id)).delete()
     db.flush()
 
-    kaydedilen = 0
-    for row in rows[1:]:
-        if len(row) < cevap_baslangic + 1: continue
-        ogrenci_no = row[0].strip()
-        if not ogrenci_no: continue
+    if is_optik:
+        # ── Optik okuyucu formati ──
+        # Sutunlar: Sinav No(0), Cevap Anahtari(1), Numarasi(2), Adi Soyadi(3),
+        #           Kitapcik Kodu(4), Sayfa No(5), Girmedi(6), 1(7), 2(8), ...
+        cevap_baslangic = 7  # 7. sutundan itibaren cevaplar
 
-        if has_ad:
-            ad_soyad = row[1].strip()
-            kitapcik = row[2].strip().upper() if len(row) > 2 else "A"
-        else:
-            ad_soyad = ""
-            kitapcik = row[1].strip().upper() if len(row) > 1 else "A"
+        # Cevap anahtarlarini topla (Cevap Anahtari sutunu "True" olan satirlar)
+        cevap_anahtarlari = {}  # kitapcik -> {soru_no: dogru_harf}
+        ogrenci_satirlari = []
 
-        if kitapcik not in "ABCDEFGH":
-            kitapcik = "A"
-
-        ogrenci = Ogrenci(sinav_id=str(sinav_id), ogrenci_no=ogrenci_no, ad=ad_soyad)
-        db.add(ogrenci); db.flush()
-
-        dogru_sayisi = 0; yanlis_sayisi = 0; bos_sayisi = 0
-        for i, cevap in enumerate(row[cevap_baslangic:], 1):
-            cevap = str(cevap).strip().upper()
-            soru_id = soru_map.get(i)
-            if not soru_id: continue
-
-            dogru_sec = db.query(SoruSecenegi).filter_by(soru_id=soru_id, dogru=True).first()
-            harfler = "ABCDE"
-            dogru_harf = None
-            if dogru_sec:
-                secenekler = db.query(SoruSecenegi).filter_by(soru_id=soru_id).order_by(SoruSecenegi.sira).all()
-                for idx, sc in enumerate(secenekler):
-                    if sc.dogru and idx < len(harfler):
-                        dogru_harf = harfler[idx]
-                        break
-
-            is_dogru = cevap == dogru_harf if dogru_harf and cevap else False
-            if not cevap or cevap == '-' or cevap == '':
-                bos_sayisi += 1
-            elif is_dogru:
-                dogru_sayisi += 1
+        for row in rows[1:]:
+            if len(row) < cevap_baslangic + 1: continue
+            is_anahtar = str(row[1]).strip().lower() == 'true'
+            if is_anahtar:
+                kit = str(row[4]).strip().upper() or 'A'
+                anahtar = {}
+                for i, cevap in enumerate(row[cevap_baslangic:], 1):
+                    c = str(cevap).strip().upper()
+                    if c and c not in ('-', '', 'NONE'):
+                        anahtar[i] = c
+                cevap_anahtarlari[kit] = anahtar
             else:
-                yanlis_sayisi += 1
+                ogrenci_no = str(row[2]).strip()
+                if ogrenci_no and ogrenci_no not in ('', 'None'):
+                    ogrenci_satirlari.append(row)
 
-            db.add(OgrenciCevap(
-                sinav_sonucu_id="temp", soru_id=soru_id,
-                verilen_secenek=cevap if cevap and cevap != '-' else None,
-                dogru=is_dogru,
-            ))
+        kaydedilen = 0
+        for row in ogrenci_satirlari:
+            ogrenci_no = str(row[2]).strip()
+            ad_soyad = str(row[3]).strip() if len(row) > 3 else ""
+            kitapcik = str(row[4]).strip().upper() if len(row) > 4 else "A"
+            girmedi = str(row[6]).strip().lower() if len(row) > 6 else ""
+
+            if not ogrenci_no or ogrenci_no in ('', 'None'): continue
+            if girmedi in ('true', 'evet', '1', 'x'): continue  # Sinava girmemis
+            if kitapcik not in "ABCDEFGH": kitapcik = "A"
+
+            anahtar = cevap_anahtarlari.get(kitapcik, {})
+
+            ogrenci = Ogrenci(sinav_id=str(sinav_id), ogrenci_no=ogrenci_no, ad=ad_soyad)
+            db.add(ogrenci); db.flush()
+
+            dogru_sayisi = 0; yanlis_sayisi = 0; bos_sayisi = 0
+            for i, cevap in enumerate(row[cevap_baslangic:], 1):
+                cevap = str(cevap).strip().upper()
+                soru_id = soru_map.get(i)
+                if not soru_id: continue
+
+                dogru_harf = anahtar.get(i)
+                is_dogru = (cevap == dogru_harf) if dogru_harf and cevap and cevap not in ('-', '', 'NONE') else False
+
+                if not cevap or cevap in ('-', '', 'NONE'):
+                    bos_sayisi += 1
+                elif is_dogru:
+                    dogru_sayisi += 1
+                else:
+                    yanlis_sayisi += 1
+
+                db.add(OgrenciCevap(
+                    sinav_sonucu_id="temp", soru_id=soru_id,
+                    verilen_secenek=cevap if cevap and cevap not in ('-', '', 'NONE') else None,
+                    dogru=is_dogru,
+                ))
+
+            toplam = dogru_sayisi + yanlis_sayisi + bos_sayisi
+            net = dogru_sayisi - (yanlis_sayisi / 4) if toplam > 0 else 0
+            ham_puan = (net / toplam * sinav.tam_puan) if toplam > 0 else 0
+
+            sonuc = Sonuc(
+                sinav_id=str(sinav_id), ogrenci_id=str(ogrenci.id),
+                ham_puan=round(ham_puan, 2), net=round(net, 2),
+                dogru=dogru_sayisi, yanlis=yanlis_sayisi, bos=bos_sayisi,
+                yuzdelik=0, kitapcik=kitapcik,
+            )
+            db.add(sonuc); db.flush()
+            db.query(OgrenciCevap).filter_by(sinav_sonucu_id="temp").update({"sinav_sonucu_id": str(sonuc.id)})
+            kaydedilen += 1
+
+    else:
+        # ── Basit format ──
+        has_ad = any('ad' in h or 'name' in h or 'soyad' in h for h in basliklar)
+        cevap_baslangic = 3 if has_ad else 2
+
+        kaydedilen = 0
+        for row in rows[1:]:
+            if len(row) < cevap_baslangic + 1: continue
+            ogrenci_no = row[0].strip()
+            if not ogrenci_no: continue
+
+            if has_ad:
+                ad_soyad = row[1].strip()
+                kitapcik = row[2].strip().upper() if len(row) > 2 else "A"
+            else:
+                ad_soyad = ""
+                kitapcik = row[1].strip().upper() if len(row) > 1 else "A"
+            if kitapcik not in "ABCDEFGH": kitapcik = "A"
+
+            ogrenci = Ogrenci(sinav_id=str(sinav_id), ogrenci_no=ogrenci_no, ad=ad_soyad)
+            db.add(ogrenci); db.flush()
+
+            dogru_sayisi = 0; yanlis_sayisi = 0; bos_sayisi = 0
+            for i, cevap in enumerate(row[cevap_baslangic:], 1):
+                cevap = str(cevap).strip().upper()
+                soru_id = soru_map.get(i)
+                if not soru_id: continue
+
+                dogru_sec = db.query(SoruSecenegi).filter_by(soru_id=soru_id, dogru=True).first()
+                harfler = "ABCDE"
+                dogru_harf = None
+                if dogru_sec:
+                    secenekler = db.query(SoruSecenegi).filter_by(soru_id=soru_id).order_by(SoruSecenegi.sira).all()
+                    for idx, sc in enumerate(secenekler):
+                        if sc.dogru and idx < len(harfler):
+                            dogru_harf = harfler[idx]
+                            break
+
+                is_dogru = cevap == dogru_harf if dogru_harf and cevap else False
+                if not cevap or cevap in ('-', ''):
+                    bos_sayisi += 1
+                elif is_dogru:
+                    dogru_sayisi += 1
+                else:
+                    yanlis_sayisi += 1
+
+                db.add(OgrenciCevap(
+                    sinav_sonucu_id="temp", soru_id=soru_id,
+                    verilen_secenek=cevap if cevap and cevap != '-' else None,
+                    dogru=is_dogru,
+                ))
 
         toplam = dogru_sayisi + yanlis_sayisi + bos_sayisi
         net = dogru_sayisi - (yanlis_sayisi / 4) if toplam > 0 else 0
