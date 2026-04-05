@@ -61,7 +61,7 @@ app.add_middleware(
 async def global_exception_handler(request: Request, exc: Exception):
     tb = traceback.format_exc()
     print(f"HATA: {request.method} {request.url}\n{tb}")
-    return JSONResponse(status_code=500, content={"detail": str(exc), "traceback": tb})
+    return JSONResponse(status_code=500, content={"detail": "Sunucu hatasi olustu."})
 
 
 app.include_router(api_router)
@@ -72,8 +72,3 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/debug/tables")
-def debug_tables():
-    from sqlalchemy import inspect
-    inspector = inspect(engine)
-    return {"tables": inspector.get_table_names()}

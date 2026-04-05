@@ -300,7 +300,7 @@ def soru_guncelle(soru_id: UUID, veri: dict, db: Session = Depends(get_db), _=De
     if "sinav_tipleri" in veri:
         db.query(SoruSinavTipi).filter_by(soru_id=str(soru_id)).delete()
         for tip in veri["sinav_tipleri"]:
-            db.add(SoruSinavTipi(soru_id=str(soru_id), sinav_turu=tip))
+            db.add(SoruSinavTipi(soru_id=str(soru_id), sinav_tipi=tip))
 
     # Kazanimlari guncelle
     if "kazanim_ids" in veri:
@@ -601,21 +601,21 @@ async def optik_yukle(sinav_id: UUID, dosya: UploadFile = File(...), db: Session
                     dogru=is_dogru,
                 ))
 
-        toplam = dogru_sayisi + yanlis_sayisi + bos_sayisi
-        net = dogru_sayisi if toplam > 0 else 0
-        ham_puan = (net / toplam * sinav.tam_puan) if toplam > 0 else 0
+            toplam = dogru_sayisi + yanlis_sayisi + bos_sayisi
+            net = dogru_sayisi if toplam > 0 else 0
+            ham_puan = (net / toplam * sinav.tam_puan) if toplam > 0 else 0
 
-        sonuc = Sonuc(
-            sinav_id=str(sinav_id), ogrenci_id=str(ogrenci.id),
-            ham_puan=round(ham_puan, 2), net=round(net, 2),
-            dogru=dogru_sayisi, yanlis=yanlis_sayisi, bos=bos_sayisi,
-            yuzdelik=0, kitapcik=kitapcik,
-        )
-        db.add(sonuc); db.flush()
+            sonuc = Sonuc(
+                sinav_id=str(sinav_id), ogrenci_id=str(ogrenci.id),
+                ham_puan=round(ham_puan, 2), net=round(net, 2),
+                dogru=dogru_sayisi, yanlis=yanlis_sayisi, bos=bos_sayisi,
+                yuzdelik=0, kitapcik=kitapcik,
+            )
+            db.add(sonuc); db.flush()
 
-        # OgrenciCevap'lara dogru sinav_sonucu_id ata
-        db.query(OgrenciCevap).filter_by(sinav_sonucu_id="temp").update({"sinav_sonucu_id": str(sonuc.id)})
-        kaydedilen += 1
+            # OgrenciCevap'lara dogru sinav_sonucu_id ata
+            db.query(OgrenciCevap).filter_by(sinav_sonucu_id="temp").update({"sinav_sonucu_id": str(sonuc.id)})
+            kaydedilen += 1
 
     db.commit()
 
@@ -2264,7 +2264,7 @@ def sinav_pdf(sinav_id: UUID, kitapcik: str = "A", cevap_anahtari: bool = False,
     import re as re_mod
 
     # Türkçe karakter destekli font kaydet
-    import glob
+    import os, glob
     font_kayitli = False
 
     # Oncelik: repo icindeki fontlar (her ortamda calisir)
